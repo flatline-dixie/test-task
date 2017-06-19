@@ -1,0 +1,333 @@
+﻿@{
+        ViewBag.Title = "Shortener";
+}
+
+@section Content
+{
+    @Styles.Render("~/Content/shortener")
+    <style>
+        .url-parent {
+            max-width: 25vw; 
+            white-space: nowrap; 
+            text-overflow: ellipsis; 
+            overflow: hidden;
+        }
+
+    </style>
+    <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <script type="text/javascript">
+        var ViewModel = function (identity) {
+            var self = this;
+            self.Identity = identity;
+
+            self.host = window.location.protocol + '//' + document.location.host;
+
+            self.BuildURI = function (str) {
+                return self.host + '/' + str;
+            }
+
+            self.links = ko.observableArray([]);
+            self.pageSize = ko.observable('');
+
+            self.SetTotalResults = ko.observable(1000);
+            self.TotalResults = ko.observable();
+            self.Pager = ko.pager(self.TotalResults);
+
+            self.Pager().CurrentPage.subscribe(function () {
+                self.search(self.identity, self.Pager().CurrentPage(), self.pageSize());
+            });
+
+            self.GetShorten = function () {
+                var shortenString = $('#original-link').val();
+                var data = { "UserId": self.Identity, "OriginalLink": shortenString };
+                $.get("/api/ShortenerData/CreateShortenLink", data, function (data) {
+                    var restData = JSON.parse(data);
+                    if (restData && restData.IsSuccess && restData.Link) {
+                        self.search();
+                        $('#original-link').val('');
+                        $('#modal-original-url').attr('href', restData.Link.OriginalLink);
+                        $('#modal-original-url').text(restData.Link.OriginalLink);
+                        $('#modal-short-url').attr('href', restData.Link.ShortLink);
+                        $('#modal-short-url').text(self.BuildURI(restData.Link.ShortLink));
+                        $("#shortenerModal").modal();
+                        return
+                    }
+
+                    alert("error");
+                })
+                    .done(function () { /*alert("second success");*/ })
+                    .fail(function () { alert("error"); });
+            };
+
+            self.search = function (userId, currentPage, pageSize) {
+                userId = userId || self.Identity;
+                currentPage = currentPage || self.Pager().CurrentPage();
+                pageSize = pageSize || self.Pager().PageSize();
+
+                var data = {"UserId": userId, "PageNumber": currentPage, "PageSize": pageSize};
+
+                $.get("/api/ShortenerData/GetLinks", data,
+                    function (data) {
+                        self.links([]);
+                        self.links(data.Results);
+                        self.SetTotalResults(data.TotalNumberOfRecords);
+                        self.Pager().CurrentPage(data.PageNumber);
+                        self.Pager().PageSize(data.PageSize);
+                        var totalItemCount = self.SetTotalResults();
+                        self.TotalResults(totalItemCount);
+                    },
+                    "json")
+                    .done(function () { /*alert("second success");*/ })
+                    .fail(function () { alert("error"); });
+            }
+
+            self.pageSize.subscribeChanged(function (newValue, oldValue) {
+                var page = self.Pager().CurrentPage();
+                self.search(self.Identity, newValue === oldValue ? page : 1, newValue);
+            });
+        }
+
+        function isGuid(value) {
+            var regex = /[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/i;
+            var match = regex.exec(value);
+            return match != null;
+        }
+        function InitModel(identity) {
+            var vm = new ViewModel(identity);
+            ko.applyBindings(vm, $('body')[0]);
+            vm.search();
+        }
+
+        ko.subscribable.fn.subscribeChanged = function (callback) {
+            var oldValue;
+            this.subscribe(function (_oldValue) {
+                var value = ko.utils.unwrapObservable(this);
+                if (value != null && value.constructor == Array) {
+                    oldValue = _oldValue.slice();
+                } else {
+                    oldValue = _oldValue;
+                }
+            }, this, 'beforeChange');
+
+            this.subscribe(function (newValue) {
+                callback(newValue, oldValue);
+            });
+        };
+
+        $(function () {
+            var key = "BBB45D40-C760-4676-97AA-93EED6E4E008"
+            var identity = $.Storage.get(key);
+            if (!identity || !isGuid(identity)) {
+                $.get("/api/ShortenerData/CreateShortenerUserId", function (data) {
+                    $.Storage.set(key, data)
+                    InitModel(data)
+                })
+                    .done(function () { /*alert("second success");*/ })
+                    .fail(function () { alert("error"); });
+            }
+            else {
+                InitModel(identity);
+            }
+        });
+
+    </script>
+
+    <script type="text/html" id="tpl-pager">
+
+        <div class="pagexofx hidden-xs pull-left">
+            <span data-bind="text: FirstItemIndex"></span>
+            -
+            <span data-bind="text: LastItemIndex"></span>
+            of
+            <strong>
+                <span data-bind="text: TotalItemCount"></span>
+            </strong>
+        </div>
+        <ul class="pagination hidden-xs pull-right">
+            <!-- ko if:CurrentPage() === 1 -->
+            <li class="disabled">
+                <a href="#" class="disabledPage">&laquo;&laquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko ifnot:CurrentPage() === 1 -->
+            <li>
+                <a href="#" data-bind="click: function(){ selectPage(1); }">&laquo;&laquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko if:HasPrevPage -->
+            <li>
+                <a href="#" data-bind="click: function(){ selectPage(CurrentPage() - 1); }">&laquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko ifnot:HasPrevPage -->
+            <li class="disabled">
+                <a href="#" class="disabledPage">&laquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko foreach:Pages -->
+            <!-- ko if:$data === $parent.CurrentPage() -->
+            <li class="active">
+                <span class="currentPage" data-bind="text: $data"></span>
+            </li>
+            <!-- /ko -->
+            <!-- ko if:$data !== $parent.CurrentPage() -->
+            <li>
+                <a href="#" data-bind="text: $data, click: function(){ $parent.selectPage($data); }"></a>
+            </li>
+            <!-- /ko -->
+            <!-- /ko -->
+            <!-- ko if:HasNextPage -->
+            <li>
+                <a href="#" data-bind="click: function(){ selectPage(CurrentPage() + 1); }">&raquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko ifnot:HasNextPage -->
+            <li class="disabled">
+                <a href="#" class="disabledPage">&raquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko ifnot:CurrentPage() === LastPage() -->
+            <li>
+                <a href="#" data-bind="click: function(){ selectPage(LastPage()); }">&raquo;&raquo;</a>
+            </li>
+            <!-- /ko -->
+            <!-- ko if:CurrentPage() === LastPage() -->
+            <li class="disabled">
+                <a href="#" class="disabledPage">&raquo;&raquo;</a>
+            </li>
+            <!-- /ko -->
+        </ul>
+    </script>
+}
+
+<div class="modal fade" id="shortenerModal" role="dialog">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+                <h4 class="modal-title">Short URL</h4>
+            </div>
+            <div class="modal-body url-parent">
+                <h5>Original URL</h5>
+                <p >
+                    <a href="#" id="modal-original-url" target="_blank"></a> 
+                </p>
+                <hr>
+                <h5>Short URL</h5>
+                <p>
+                    <a href="#" id="modal-short-url" target="_blank"></a>
+                </p>
+            </div>
+
+            <div class="form-group modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row">
+        <section class="content">
+            <br />
+            <div class="col-md-12">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <div class="row">
+                            <div class="col col-xs-6">
+                                <h3 class="panel-title">Shorten you links</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="pull-right">
+                        </div>
+                        <div class="form-horizontal" role="form">
+                            <div class="form-group">
+                                <div class="col-sm-10">
+                                    <input class="form-control" style="max-width:none;" id="original-link" placeholder="Enter original link" name="original-link">
+                                </div>
+                                <button type="submit" class="btn btn-default" data-bind="click: GetShorten">Shorten</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+
+<div class="container">
+    <div class="row">
+        <section class="content">
+            <div class="col-md-12 ">
+                <div class="panel panel-default  panel-table">
+                    <div class="panel-body">
+                        <div class="table-container">
+                            <table class="table ">
+                                <thead>
+                                    <tr>
+                                        <th class="col-xs-7">Original URL</th>
+                                        <th class="col-xs-1">Created</th>
+                                        <th class="col-xs-3">Short URL</th>
+                                        <th class="col-xs-1">Clicks</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-bind="foreach: links">
+                                    <tr data-status="pagado">
+                                        <td class="url-parent">
+                                            <a data-bind="text: OriginalLink, attr: {href: OriginalLink}" target="_blank"></a>                                          
+                                        </td>
+                                        <td>
+                                            <span data-bind="text: CreateDate"> </span>
+                                        </td>
+                                        <td class="url-parent">
+                                            <a data-bind="text: $root.BuildURI(ShortLink), attr: {href: $root.BuildURI(ShortLink)}" target="_blank"></a>
+                                        </td>
+                                        <td>
+                                            <span data-bind="text: ClickCount"> </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="panel-footer">
+
+                        <div class="row">
+                            <div class="col col-xs-7">
+                                <div class="pagexofx hidden-xs pull-right">
+                                    <!-- ko if:Pager().TotalItemCount() > 0 -->
+                                    <label>Rows per page:</label>
+                                    <select id="PageSize" data-bind="value: pageSize">
+                                        <option value="1">1</option>
+                                        <option value="5">5</option>
+                                        <option selected="selected" value="10">10</option>
+                                        <option value="15">15</option>
+                                        <option value="20">20</option>
+                                    </select>
+                                    <!-- /ko -->
+                                </div>
+                            </div>
+
+                            <div class="col col-xs-5 pull-right">
+                                <!-- ko if:Pager().TotalItemCount() > 0 -->
+                                <div data-bind="template:{ name: 'tpl-pager', data: Pager }">
+                                </div>
+                                <!-- /ko -->
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</div>
